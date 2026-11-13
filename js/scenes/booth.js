@@ -6,8 +6,8 @@ import { PRESETS, makeBackground, fileToBackground, backgroundFromDataURL } from
 const HW = FW / 2;   // each person fills half of every photo; the host is always on the left
 
 const TEMPLATE = `
-  <h1>Photobooth</h1>
-  <p class="sub">Four photos, taken together.</p>
+  <header class="mast"><span>Happy 21st Birthday, My love</span><span>Four frames, two people</span><span>Live</span></header>
+  <h1 class="booth-title">21 years, still as pretty as ever.</h1>
   <div class="layout">
     <section>
       <div class="stage duo" data-ref="stage">
@@ -19,9 +19,10 @@ const TEMPLATE = `
         <div class="count" data-ref="count" aria-live="assertive"></div>
         <div class="flash" data-ref="flash"></div>
       </div>
-      <p class="bglabel">Background (pick what you like bebu)</p>
+      <p class="bglabel">Background, shared by both of you</p>
       <div class="bgs" role="group" aria-label="Background" data-ref="bgs"></div>
       <input type="file" accept="image/*" data-ref="file" hidden>
+      <p class="bglabel">Film</p>
       <div class="modes" role="group" aria-label="Photo style">
         <button data-ref="mNormal" aria-pressed="true">Normal</button>
         <button data-ref="mRetro" aria-pressed="false">Retro</button>
@@ -35,6 +36,7 @@ const TEMPLATE = `
     </section>
     <aside class="strip-wrap">
       <canvas id="strip" data-ref="strip" aria-label="Your photo strip"></canvas>
+      <p class="strip-cap">Strip no. 01</p>
     </aside>
   </div>`;
 

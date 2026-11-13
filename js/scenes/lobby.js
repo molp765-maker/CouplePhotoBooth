@@ -2,10 +2,13 @@ import { startCamera } from '../booth/camera.js';
 import { hostRoom, joinRoom } from '../net/session.js';
 
 const TEMPLATE = `
-  <h1>Photobooth</h1>
-  <p class="sub">Step into the booth together.</p>
-  <div class="lobby">
-    <div class="stage lobby-cam"><video data-ref="cam" autoplay playsinline muted></video></div>
+  <header class="mast"><span>Happy 21st Birthday, My love</span><span>Issue 01</span><span>Made for two</span></header>
+  <div class="cover">
+    <h1 class="cover-title"><span>Lorin's</span><span>21st </span><span>Birthday</span></h1>
+    <figure class="print">
+      <div class="stage lobby-cam"><video data-ref="cam" autoplay playsinline muted></video></div>
+      <figcaption><span>Frame 00</span><span>Live</span></figcaption>
+    </figure>
     <div class="lobby-actions">
       <button class="primary" data-ref="create" disabled>Create a room</button>
       <div class="share" data-ref="share" hidden>
