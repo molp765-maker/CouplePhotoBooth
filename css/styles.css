@@ -41,7 +41,7 @@
   @keyframes flash { from { opacity: 1; } to { opacity: 0; } }
   @media (prefers-reduced-motion: reduce) { .flash.go { animation-duration: .01s; } }
 
-  .stage.retro video { filter: grayscale(1) sepia(.35) contrast(1.25) brightness(1.05); }
+  .stage.retro canvas { filter: grayscale(1) sepia(.35) contrast(1.25) brightness(1.05); }
   .stage.retro::after {
     content: ""; position: absolute; inset: 0; pointer-events: none;
     background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.55) 100%);
@@ -85,3 +85,13 @@
 }
 .join input { text-transform: uppercase; letter-spacing: .15em; }
 .lobby input:focus-visible { outline: 3px solid var(--lamp); outline-offset: 2px; }
+
+/* background setting */
+.stage.duo canvas { width: 100%; height: 100%; display: block; }
+.stage.duo canvas + canvas { border-left: 3px solid var(--ink); }
+.src { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.bglabel { margin: 16px 0 6px; font-size: .9rem; opacity: .85; }
+.bgs { display: flex; flex-wrap: wrap; gap: 8px; }
+.bgs button { padding: 8px 14px; font-size: .9rem; }
+.bgs button[aria-pressed="true"] { background: var(--paper); color: var(--ink); }
+.bglabel + .bgs + input + .modes { margin-top: 16px; }

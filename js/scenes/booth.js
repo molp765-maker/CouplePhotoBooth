@@ -1,5 +1,7 @@
-import { grabFrame, stopCamera } from '../booth/camera.js';
+import { stopCamera } from '../booth/camera.js';
 import { createStrip, SHOTS, FW, FH } from '../booth/strip.js';
+import { HalfRenderer, createSegmenter } from '../booth/cutout.js';
+import { PRESETS, makeBackground, fileToBackground, backgroundFromDataURL } from '../booth/scenery.js';
 
 const HW = FW / 2;   // each person fills half of every photo; the host is always on the left
 
@@ -9,12 +11,17 @@ const TEMPLATE = `
   <div class="layout">
     <section>
       <div class="stage duo" data-ref="stage">
-        <video data-ref="vHost" autoplay playsinline muted></video>
-        <video data-ref="vGuest" autoplay playsinline muted></video>
+        <video class="src" data-ref="vHost" autoplay playsinline muted></video>
+        <video class="src" data-ref="vGuest" autoplay playsinline muted></video>
+        <canvas data-ref="cHost"></canvas>
+        <canvas data-ref="cGuest"></canvas>
         <div class="lamp" data-ref="lamp"></div>
         <div class="count" data-ref="count" aria-live="assertive"></div>
         <div class="flash" data-ref="flash"></div>
       </div>
+      <p class="bglabel">Background (pick what you like bebu)</p>
+      <div class="bgs" role="group" aria-label="Background" data-ref="bgs"></div>
+      <input type="file" accept="image/*" data-ref="file" hidden>
       <div class="modes" role="group" aria-label="Photo style">
         <button data-ref="mNormal" aria-pressed="true">Normal</button>
         <button data-ref="mRetro" aria-pressed="false">Retro</button>
@@ -32,13 +39,12 @@ const TEMPLATE = `
   </div>`;
 
 const wait = ms => new Promise(r => setTimeout(r, ms));
-let activeState = null;
+let cleanup = null;
 
 export const boothScene = {
   mount(root, { state, go }) {
     const session = state.session;
     if (!session) { go('lobby'); return; }
-    activeState = state;
 
     root.innerHTML = TEMPLATE;
     const $ = {};
@@ -47,26 +53,81 @@ export const boothScene = {
     const isHost = session.role === 'host';
     $.vHost.srcObject = isHost ? state.localStream : session.remoteStream;
     $.vGuest.srcObject = isHost ? session.remoteStream : state.localStream;
-    const localVideo = isHost ? $.vHost : $.vGuest;
-    let busy = false;
-    let remote = [];   // the other person's halves, by photo number
+    const hostR = new HalfRenderer($.vHost, $.cHost, 'left');
+    const guestR = new HalfRenderer($.vGuest, $.cGuest, 'right');
+    const localCanvas = isHost ? $.cHost : $.cGuest;
+    let busy = false, remote = [];
+    let bgId = 'original', bgCanvas = null, segReady = false;
 
+    // ---- background setting (shared with the other person) ----
+    const chips = [{ id: 'original', label: 'Original' }, ...PRESETS, { id: 'custom', label: 'Your photo' }];
+    chips.forEach(c => {
+      const b = document.createElement('button');
+      b.textContent = c.label; b.dataset.id = c.id; b.setAttribute('aria-pressed', c.id === 'original');
+      b.addEventListener('click', () => (c.id === 'custom' ? $.file.click() : applyBackground(c.id)));
+      $.bgs.appendChild(b);
+    });
+    const markChips = () => $.bgs.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.id === bgId));
+
+    async function applyBackground(id, data, fromRemote) {
+      try {
+        if (id === 'original') {
+          bgCanvas = null;
+        } else {
+          bgCanvas = id === 'custom' ? await backgroundFromDataURL(data) : makeBackground(id);
+          if (!segReady) {
+            $.status.textContent = 'Loading the background effect…';
+            hostR.segmenter = await createSegmenter();
+            guestR.segmenter = await createSegmenter();
+            segReady = true;
+          }
+          $.status.textContent = 'Background ready.';
+        }
+        bgId = id;
+      } catch (e) {
+        bgId = 'original'; bgCanvas = null;
+        $.status.textContent = 'The background effect could not load, so the original is on. Check your connection.';
+      }
+      markChips();
+      if (!fromRemote) session.send({ type: 'bg', id: bgId, data });
+    }
+
+    $.file.addEventListener('change', async () => {
+      const f = $.file.files[0];
+      if (f) applyBackground('custom', await fileToBackground(f));
+      $.file.value = '';
+    });
+
+    // ---- live preview ----
+    let raf = 0, last = 0;
+    function loop(now) {
+      if (now - last >= 50) {
+        last = now;
+        try { hostR.render(bgCanvas, now); guestR.render(bgCanvas, now); }
+        catch (e) { bgCanvas = null; bgId = 'original'; markChips(); $.status.textContent = 'The background effect stopped, so the original is on.'; }
+      }
+      raf = requestAnimationFrame(loop);
+    }
+    raf = requestAnimationFrame(loop);
+
+    // ---- messages from the other person ----
     const slot = i => remote[i] || (remote[i] = (() => {
       let resolve; const promise = new Promise(r => { resolve = r; });
       return { promise, resolve };
     })());
-
     session.on('frame', m => {
       const img = new Image();
       img.onload = () => slot(m.i).resolve(img);
       img.src = m.data;
     });
+    session.on('bg', m => applyBackground(m.id, m.data, true));
     session.on('start', () => run());
     session.on('closed', () => {
       $.status.textContent = 'The other person left the booth.';
       [$.start, $.retake].forEach(b => { b.disabled = true; });
     });
 
+    // ---- photos ----
     const redraw = () => strip.draw(state.shots, state.mode);
 
     function compose(mine, theirs) {
@@ -102,7 +163,9 @@ export const boothScene = {
         $.status.textContent = `Photo ${i + 1} of ${SHOTS}. Get ready.`;
         await countdown(3);
         $.flash.classList.remove('go'); void $.flash.offsetWidth; $.flash.classList.add('go');
-        const mine = grabFrame(localVideo, HW, FH);
+        const mine = document.createElement('canvas');   // your half, with the chosen background
+        mine.width = HW; mine.height = FH;
+        mine.getContext('2d').drawImage(localCanvas, 0, 0, HW, FH);
         session.send({ type: 'frame', i, data: mine.toDataURL('image/jpeg', 0.9) });
         const theirs = await Promise.race([slot(i).promise, wait(8000).then(() => null)]);
         state.shots.push(compose(mine, theirs));
@@ -129,13 +192,17 @@ export const boothScene = {
     });
 
     redraw();
+
+    cleanup = () => {
+      cancelAnimationFrame(raf);
+      hostR.close(); guestR.close();
+      stopCamera(state.localStream);
+      session.close();
+      state.localStream = null; state.session = null; state.shots = [];
+    };
   },
 
   unmount() {
-    if (!activeState) return;
-    stopCamera(activeState.localStream);
-    if (activeState.session) activeState.session.close();
-    activeState.localStream = null; activeState.session = null; activeState.shots = [];
-    activeState = null;
+    if (cleanup) { cleanup(); cleanup = null; }
   },
 };
