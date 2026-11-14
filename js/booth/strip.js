@@ -1,23 +1,28 @@
-import { retroFrame } from './filters.js';
+import { getFilter, gradeFrame } from './filters.js';
 
 export const SHOTS = 4, FW = 432, FH = 324, PAD = 24;
 const W = FW + PAD * 2, H = PAD + SHOTS * (FH + PAD) + 90;
-const retroCache = new WeakMap();   // raw shot -> its retro version, so grain doesn't change on redraw
+const cache = new WeakMap();   // raw shot -> its graded versions, so grain doesn't change on redraw
+function graded(shot, f) {
+  if (!f.p) return shot;
+  let m = cache.get(shot);
+  if (!m) { m = {}; cache.set(shot, m); }
+  return m[f.id] || (m[f.id] = gradeFrame(shot, f.p));
+}
 
 export function createStrip(canvas) {
   const ctx = canvas.getContext('2d');
   canvas.width = W; canvas.height = H;
 
-  function draw(shots, mode) {
-    const retro = mode === 'retro';
-    ctx.fillStyle = retro ? '#e6dac3' : '#F4EFE6';
+  function draw(shots, filterId) {
+    const f = getFilter(filterId);
+    ctx.fillStyle = f.paper;
     ctx.fillRect(0, 0, W, H);
     for (let i = 0; i < SHOTS; i++) {
       const y = PAD + i * (FH + PAD);
       const shot = shots[i];
       if (shot) {
-        if (retro && !retroCache.has(shot)) retroCache.set(shot, retroFrame(shot));
-        ctx.drawImage(retro ? retroCache.get(shot) : shot, PAD, y);
+        ctx.drawImage(graded(shot, f), PAD, y);
       } else {
         ctx.fillStyle = '#d9d2cc';
         ctx.fillRect(PAD, y, FW, FH);

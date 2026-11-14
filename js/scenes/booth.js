@@ -1,4 +1,5 @@
 import { stopCamera } from '../booth/camera.js';
+import { FILTERS, getFilter, stampText } from '../booth/filters.js';
 import { createStrip, SHOTS, FW, FH } from '../booth/strip.js';
 import { HalfRenderer, createSegmenter } from '../booth/cutout.js';
 import { PRESETS, makeBackground, fileToBackground, backgroundFromDataURL } from '../booth/scenery.js';
@@ -6,7 +7,7 @@ import { PRESETS, makeBackground, fileToBackground, backgroundFromDataURL } from
 const HW = FW / 2;   // each person fills half of every photo; the host is always on the left
 
 const TEMPLATE = `
-  <header class="mast"><span>Happy 21st Birthday, My love</span><span>Four frames, two people</span><span>Live</span></header>
+  <header class="mast"><span>Happy 21st Birthday, My love</span><span>Special gift, special memories, </span><span>special moments, special girl</span></header>
   <h1 class="booth-title">21 years, still as pretty as ever.</h1>
   <div class="layout">
     <section>
@@ -30,8 +31,9 @@ const TEMPLATE = `
           <button data-ref="retake" hidden>Retake</button>
           <button data-ref="save" hidden>Save strip</button>
         </div>
-        <button class="film" data-ref="film" aria-pressed="false">Film: Normal</button>
+        <button class="film" data-ref="film" aria-expanded="false">Film: <span data-ref="filmName">Normal</span> ▾</button>
       </div>
+      <div class="filmpop" data-ref="filmPop" hidden></div>
       <p id="status" data-ref="status">You are both in. Either of you can press Start.</p>
     </section>
     <aside class="strip-wrap">
@@ -58,7 +60,7 @@ export const boothScene = {
     let hostR, guestR;
     if (solo) {
       $.stage.classList.remove('duo'); $.vGuest.remove(); $.cGuest.remove();
-      root.querySelector('.mast span:nth-child(2)').textContent = 'Four frames, one person';
+      root.querySelector('.mast span:nth-child(2)').textContent = 'Special gift, special memories, ';
       $.status.textContent = 'Press Start when you are ready.';
       hostR = new HalfRenderer($.vHost, $.cHost, 'full', 576, 432);
     } else {
@@ -121,12 +123,16 @@ export const boothScene = {
     });
 
     // ---- live preview ----
-    let raf = 0, last = 0;
+    let raf = 0, last = 0, lastThumb = 0;
     function loop(now) {
       if (now - last >= 50) {
         last = now;
         try { hostR.render(bgCanvas, now); if (guestR) guestR.render(bgCanvas, now); }
         catch (e) { bgCanvas = null; bgId = 'original'; markChips(); $.status.textContent = 'The background effect stopped, so the original is on.'; }
+      }
+      if (!$.filmPop.hidden && now - lastThumb >= 250) {
+        lastThumb = now;
+        thumbs.forEach(t => t.getContext('2d').drawImage(localCanvas, 0, 0, t.width, t.height));
       }
       raf = requestAnimationFrame(loop);
     }
@@ -150,7 +156,7 @@ export const boothScene = {
     });
 
     // ---- photos ----
-    const redraw = () => strip.draw(state.shots, state.mode);
+    const redraw = () => strip.draw(state.shots, state.filter);
 
     function compose(mine, theirs) {
       const c = document.createElement('canvas');
@@ -163,11 +169,14 @@ export const boothScene = {
       return c;
     }
 
-    function setMode(m) {
-      state.mode = m;
-      $.stage.classList.toggle('retro', m === 'retro');
-      $.film.textContent = `Film: ${m === 'retro' ? 'Retro' : 'Normal'}`;
-      $.film.setAttribute('aria-pressed', m === 'retro');
+    function setFilter(id) {
+      const f = getFilter(id);
+      state.filter = f.id;
+      $.stage.style.setProperty('--film', f.css);
+      $.stage.style.setProperty('--vig', f.vig || 0);
+      if (f.p && f.p.stamp) $.stage.dataset.stamp = stampText(); else delete $.stage.dataset.stamp;
+      $.filmName.textContent = f.label;
+      $.filmPop.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.id === f.id));
       redraw();
     }
 
@@ -206,17 +215,33 @@ export const boothScene = {
 
     const begin = () => { if (!busy) { session.send({ type: 'start' }); run(); } };
 
-    $.film.addEventListener('click', () => setMode(state.mode === 'retro' ? 'normal' : 'retro'));
+    // film picker: one link that opens a row of live thumbnails
+    const thumbs = [];
+    const ratio = localCanvas.height / localCanvas.width;
+    FILTERS.forEach(f => {
+      const b = document.createElement('button');
+      b.className = 'fthumb'; b.dataset.id = f.id; b.setAttribute('aria-pressed', f.id === state.filter);
+      const t = document.createElement('canvas');
+      t.width = 96; t.height = Math.round(96 * ratio); t.style.filter = f.css;
+      const label = document.createElement('span'); label.textContent = f.label;
+      b.append(t, label);
+      b.addEventListener('click', () => setFilter(f.id));
+      $.filmPop.appendChild(b); thumbs.push(t);
+    });
+    $.film.addEventListener('click', () => {
+      const open = $.filmPop.hidden;
+      $.filmPop.hidden = !open; $.film.setAttribute('aria-expanded', open);
+    });
     $.start.addEventListener('click', begin);
     $.retake.addEventListener('click', begin);
     $.save.addEventListener('click', () => {
       const a = document.createElement('a');
-      a.download = `photobooth-strip-${state.mode}.png`;
+      a.download = `photobooth-strip-${state.filter}.png`;
       a.href = strip.toDataURL();
       a.click();
     });
 
-    redraw();
+    setFilter(state.filter);
 
     cleanup = () => {
       cancelAnimationFrame(raf);

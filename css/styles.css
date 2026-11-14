@@ -144,3 +144,15 @@ button.sw[aria-pressed="true"] { outline-color: var(--ink); }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; }
 button.film { border: 0; border-bottom: 1px solid var(--ink); padding: 6px 0; background: none; color: var(--ink); }
 button.film:hover:not(:disabled), button.film[aria-pressed="true"] { background: none; color: var(--red); }
+
+/* film looks: live view filter, vignette, camcorder stamp, thumbnail picker */
+.stage > canvas { filter: var(--film, none); }
+.stage::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,var(--vig, 0)) 100%); }
+.stage[data-stamp]::before { content: attr(data-stamp); position: absolute; right: 12px; bottom: 10px; z-index: 2; font: 500 13px/1 var(--mono); color: #ffb347; text-shadow: 0 0 6px rgba(255,140,40,.6); pointer-events: none; }
+.filmpop { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--ink); }
+button.fthumb { width: 68px; padding: 0; border: 0; background: none; color: var(--ink); text-align: left; font: 500 9px/1.2 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+button.fthumb canvas { width: 100%; display: block; outline: 1px solid transparent; outline-offset: 2px; transition: outline-color .2s; }
+button.fthumb span { display: block; margin-top: 7px; }
+button.fthumb:hover:not(:disabled), button.fthumb[aria-pressed="true"] { background: none; color: var(--ink); }
+button.fthumb:hover:not(:disabled) span { color: var(--red); }
+button.fthumb[aria-pressed="true"] canvas { outline-color: var(--ink); }
