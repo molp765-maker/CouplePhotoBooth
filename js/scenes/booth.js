@@ -19,18 +19,18 @@ const TEMPLATE = `
         <div class="count" data-ref="count" aria-live="assertive"></div>
         <div class="flash" data-ref="flash"></div>
       </div>
-      <p class="bglabel">Background, shared by both of you</p>
-      <div class="bgs" role="group" aria-label="Background" data-ref="bgs"></div>
-      <input type="file" accept="image/*" data-ref="file" hidden>
-      <p class="bglabel">Film</p>
-      <div class="modes" role="group" aria-label="Photo style">
-        <button data-ref="mNormal" aria-pressed="true">Normal</button>
-        <button data-ref="mRetro" aria-pressed="false">Retro</button>
+      <div class="tools">
+        <div class="bgs" role="group" aria-label="Background" data-ref="bgs"></div>
+        <span class="bgname" data-ref="bgName">Original</span>
       </div>
+      <input type="file" accept="image/*" data-ref="file" hidden>
       <div class="controls">
-        <button class="primary" data-ref="start">Start</button>
-        <button data-ref="retake" disabled>Retake</button>
-        <button data-ref="save" disabled>Save strip</button>
+        <div class="actions">
+          <button class="primary" data-ref="start">Start</button>
+          <button data-ref="retake" hidden>Retake</button>
+          <button data-ref="save" hidden>Save strip</button>
+        </div>
+        <button class="film" data-ref="film" aria-pressed="false">Film: Normal</button>
       </div>
       <p id="status" data-ref="status">You are both in. Either of you can press Start.</p>
     </section>
@@ -52,24 +52,44 @@ export const boothScene = {
     const $ = {};
     root.querySelectorAll('[data-ref]').forEach(el => { $[el.dataset.ref] = el; });
     const strip = createStrip($.strip);
-    const isHost = session.role === 'host';
+    const solo = session.role === 'solo';
+    const isHost = session.role !== 'guest';
     $.vHost.srcObject = isHost ? state.localStream : session.remoteStream;
-    $.vGuest.srcObject = isHost ? session.remoteStream : state.localStream;
-    const hostR = new HalfRenderer($.vHost, $.cHost, 'left');
-    const guestR = new HalfRenderer($.vGuest, $.cGuest, 'right');
+    let hostR, guestR;
+    if (solo) {
+      $.stage.classList.remove('duo'); $.vGuest.remove(); $.cGuest.remove();
+      root.querySelector('.mast span:nth-child(2)').textContent = 'Four frames, one person';
+      $.status.textContent = 'Press Start when you are ready.';
+      hostR = new HalfRenderer($.vHost, $.cHost, 'full', 576, 432);
+    } else {
+      $.vGuest.srcObject = isHost ? session.remoteStream : state.localStream;
+      hostR = new HalfRenderer($.vHost, $.cHost, 'left');
+      guestR = new HalfRenderer($.vGuest, $.cGuest, 'right');
+    }
     const localCanvas = isHost ? $.cHost : $.cGuest;
     let busy = false, remote = [];
     let bgId = 'original', bgCanvas = null, segReady = false;
 
     // ---- background setting (shared with the other person) ----
+    const CAMERA = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="7" width="18" height="12"/><circle cx="12" cy="13" r="3.2"/><path d="M8 7l1.5-2h5L16 7"/></svg>';
+    const PLUS = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
     const chips = [{ id: 'original', label: 'Original' }, ...PRESETS, { id: 'custom', label: 'Your photo' }];
     chips.forEach(c => {
       const b = document.createElement('button');
-      b.textContent = c.label; b.dataset.id = c.id; b.setAttribute('aria-pressed', c.id === 'original');
+      b.className = c.colors ? 'sw' : 'sw o';
+      b.dataset.id = c.id; b.dataset.label = c.label; b.title = c.label; b.setAttribute('aria-label', c.label);
+      b.setAttribute('aria-pressed', c.id === 'original');
+      b.innerHTML = c.colors
+        ? `<span style="background:${c.colors[0]}"></span><span style="background:${c.colors[1]}"></span>`
+        : (c.id === 'original' ? CAMERA : PLUS);
       b.addEventListener('click', () => (c.id === 'custom' ? $.file.click() : applyBackground(c.id)));
       $.bgs.appendChild(b);
     });
-    const markChips = () => $.bgs.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.id === bgId));
+    const markChips = () => $.bgs.querySelectorAll('button').forEach(b => {
+      const on = b.dataset.id === bgId;
+      b.setAttribute('aria-pressed', on);
+      if (on) $.bgName.textContent = b.dataset.label;
+    });
 
     async function applyBackground(id, data, fromRemote) {
       try {
@@ -80,7 +100,7 @@ export const boothScene = {
           if (!segReady) {
             $.status.textContent = 'Loading the background effect…';
             hostR.segmenter = await createSegmenter();
-            guestR.segmenter = await createSegmenter();
+            if (guestR) guestR.segmenter = await createSegmenter();
             segReady = true;
           }
           $.status.textContent = 'Background ready.';
@@ -105,7 +125,7 @@ export const boothScene = {
     function loop(now) {
       if (now - last >= 50) {
         last = now;
-        try { hostR.render(bgCanvas, now); guestR.render(bgCanvas, now); }
+        try { hostR.render(bgCanvas, now); if (guestR) guestR.render(bgCanvas, now); }
         catch (e) { bgCanvas = null; bgId = 'original'; markChips(); $.status.textContent = 'The background effect stopped, so the original is on.'; }
       }
       raf = requestAnimationFrame(loop);
@@ -146,8 +166,8 @@ export const boothScene = {
     function setMode(m) {
       state.mode = m;
       $.stage.classList.toggle('retro', m === 'retro');
-      $.mNormal.setAttribute('aria-pressed', m === 'normal');
-      $.mRetro.setAttribute('aria-pressed', m === 'retro');
+      $.film.textContent = `Film: ${m === 'retro' ? 'Retro' : 'Normal'}`;
+      $.film.setAttribute('aria-pressed', m === 'retro');
       redraw();
     }
 
@@ -159,31 +179,34 @@ export const boothScene = {
     async function run() {
       if (busy) return;
       busy = true; remote = []; state.shots = []; redraw();
-      [$.start, $.retake, $.save].forEach(b => { b.disabled = true; });
+      $.start.hidden = true; $.retake.hidden = true; $.save.hidden = true;
       $.lamp.classList.add('on');
       for (let i = 0; i < SHOTS; i++) {
         $.status.textContent = `Photo ${i + 1} of ${SHOTS}. Get ready.`;
         await countdown(3);
         $.flash.classList.remove('go'); void $.flash.offsetWidth; $.flash.classList.add('go');
         const mine = document.createElement('canvas');   // your half, with the chosen background
-        mine.width = HW; mine.height = FH;
-        mine.getContext('2d').drawImage(localCanvas, 0, 0, HW, FH);
-        session.send({ type: 'frame', i, data: mine.toDataURL('image/jpeg', 0.9) });
-        const theirs = await Promise.race([slot(i).promise, wait(8000).then(() => null)]);
-        state.shots.push(compose(mine, theirs));
+        mine.width = solo ? FW : HW; mine.height = FH;
+        mine.getContext('2d').drawImage(localCanvas, 0, 0, mine.width, FH);
+        if (solo) {
+          state.shots.push(mine);
+        } else {
+          session.send({ type: 'frame', i, data: mine.toDataURL('image/jpeg', 0.9) });
+          const theirs = await Promise.race([slot(i).promise, wait(8000).then(() => null)]);
+          state.shots.push(compose(mine, theirs));
+        }
         redraw();
         await wait(600);
       }
       $.lamp.classList.remove('on');
       $.status.textContent = 'Done. Save your strip or retake.';
-      $.retake.disabled = false; $.save.disabled = false;
+      $.retake.hidden = false; $.save.hidden = false; $.retake.disabled = false; $.save.disabled = false;
       busy = false;
     }
 
     const begin = () => { if (!busy) { session.send({ type: 'start' }); run(); } };
 
-    $.mNormal.addEventListener('click', () => setMode('normal'));
-    $.mRetro.addEventListener('click', () => setMode('retro'));
+    $.film.addEventListener('click', () => setMode(state.mode === 'retro' ? 'normal' : 'retro'));
     $.start.addEventListener('click', begin);
     $.retake.addEventListener('click', begin);
     $.save.addEventListener('click', () => {
@@ -197,7 +220,7 @@ export const boothScene = {
 
     cleanup = () => {
       cancelAnimationFrame(raf);
-      hostR.close(); guestR.close();
+      hostR.close(); if (guestR) guestR.close();
       stopCamera(state.localStream);
       session.close();
       state.localStream = null; state.session = null; state.shots = [];

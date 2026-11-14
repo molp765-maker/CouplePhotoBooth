@@ -2,10 +2,10 @@
 // so the two halves of a photo join up into a single scene.
 export const BW = 864, BH = 648;
 export const PRESETS = [
-  { id: 'sunset', label: 'Sunset' },
-  { id: 'night', label: 'Night sky' },
-  { id: 'bokeh', label: 'Bokeh' },
-  { id: 'curtain', label: 'Curtain' },
+  { id: 'sunset', label: 'Sunset', colors: ['#c2427a', '#ff8c5a'] },
+  { id: 'night', label: 'Night sky', colors: ['#050a24', '#1f2f68'] },
+  { id: 'bokeh', label: 'Bokeh', colors: ['#ff9ec4', '#8f6bff'] },
+  { id: 'curtain', label: 'Curtain', colors: ['#7d1c2e', '#4d0f1b'] },
 ];
 
 function rng(seed) {   // small seeded random, so both browsers draw the exact same picture

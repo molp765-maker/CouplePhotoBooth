@@ -59,3 +59,8 @@ export function joinRoom(code, localStream, { onReady, onError }) {
     call.on('stream', r => { s.remoteStream = r; check(); });
   });
 }
+
+// Booth for one person: same shape as a real session, but nothing is sent anywhere.
+export function soloSession() {
+  return { role: 'solo', remoteStream: null, connected: true, send() {}, on() {}, close() {} };
+}

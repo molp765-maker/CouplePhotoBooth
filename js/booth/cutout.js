@@ -28,10 +28,11 @@ export async function createSegmenter() {
 const make = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
 
 export class HalfRenderer {
-  constructor(video, canvas, side) {
+  constructor(video, canvas, side, ow = OW, oh = OH) {
+    this.ow = ow; this.oh = oh;
     this.video = video; this.out = canvas; this.side = side;   // side: 'left' | 'right' half of the background
-    canvas.width = OW; canvas.height = OH;
-    this.person = make(OW, OH);
+    canvas.width = this.ow; canvas.height = this.oh;
+    this.person = make(this.ow, this.oh);
     this.maskCanvas = make(1, 1); this.maskImg = null;
     this.segmenter = null;
     this.flip = false; this.locked = false; this.cal = [];   // guards against an inverted mask
@@ -57,15 +58,15 @@ export class HalfRenderer {
   render(bg, now) {
     const v = this.video;
     if (!v.videoWidth) return;
-    const target = OW / OH;
+    const target = this.ow / this.oh;
     let sw = v.videoWidth, sh = sw / target;
     if (sh > v.videoHeight) { sh = v.videoHeight; sw = sh * target; }
     const sx = (v.videoWidth - sw) / 2, sy = (v.videoHeight - sh) / 2;
     const g = this.out.getContext('2d');
 
     if (!bg || !this.segmenter) {
-      g.save(); g.translate(OW, 0); g.scale(-1, 1);
-      g.drawImage(v, sx, sy, sw, sh, 0, 0, OW, OH);
+      g.save(); g.translate(this.ow, 0); g.scale(-1, 1);
+      g.drawImage(v, sx, sy, sw, sh, 0, 0, this.ow, this.oh);
       g.restore();
       return;
     }
@@ -93,15 +94,16 @@ export class HalfRenderer {
     if (res.close) res.close();
 
     const p = this.person.getContext('2d');
-    p.clearRect(0, 0, OW, OH);
+    p.clearRect(0, 0, this.ow, this.oh);
     p.save();
-    p.translate(OW, 0); p.scale(-1, 1);
-    p.drawImage(v, sx, sy, sw, sh, 0, 0, OW, OH);
+    p.translate(this.ow, 0); p.scale(-1, 1);
+    p.drawImage(v, sx, sy, sw, sh, 0, 0, this.ow, this.oh);
     p.globalCompositeOperation = 'destination-in';
-    p.drawImage(this.maskCanvas, sx * tw / v.videoWidth, sy * th / v.videoHeight, sw * tw / v.videoWidth, sh * th / v.videoHeight, 0, 0, OW, OH);
+    p.drawImage(this.maskCanvas, sx * tw / v.videoWidth, sy * th / v.videoHeight, sw * tw / v.videoWidth, sh * th / v.videoHeight, 0, 0, this.ow, this.oh);
     p.restore();
 
-    g.drawImage(bg, this.side === 'left' ? 0 : bg.width / 2, 0, bg.width / 2, bg.height, 0, 0, OW, OH);
+    const full = this.side === 'full';
+    g.drawImage(bg, this.side === 'right' ? bg.width / 2 : 0, 0, full ? bg.width : bg.width / 2, bg.height, 0, 0, this.ow, this.oh);
     g.drawImage(this.person, 0, 0);
   }
 

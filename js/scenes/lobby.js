@@ -1,13 +1,13 @@
 import { startCamera } from '../booth/camera.js';
-import { hostRoom, joinRoom } from '../net/session.js';
+import { hostRoom, joinRoom, soloSession } from '../net/session.js';
 
 const TEMPLATE = `
-  <header class="mast"><span>Happy 21st Birthday, My love</span><span>Issue 01</span><span>Made for two</span></header>
+  <header class="mast"><span>Happy 21st Birthday, My love</span><span></span><span>Special gift for a special girl</span></header>
   <div class="cover">
     <h1 class="cover-title"><span>Lorin's</span><span>21st </span><span>Birthday</span></h1>
     <figure class="print">
       <div class="stage lobby-cam"><video data-ref="cam" autoplay playsinline muted></video></div>
-      <figcaption><span>Frame 00</span><span>Live</span></figcaption>
+      <figcaption><span></span><span>Lorin's Special day</span></figcaption>
     </figure>
     <div class="lobby-actions">
       <button class="primary" data-ref="create" disabled>Create a room</button>
@@ -20,6 +20,7 @@ const TEMPLATE = `
         <input data-ref="code" maxlength="5" placeholder="Room code" aria-label="Room code" autocapitalize="characters">
         <button data-ref="join" disabled>Join</button>
       </div>
+      <button class="solo" data-ref="solo" disabled>Solo mode</button>
     </div>
   </div>
   <p id="status" data-ref="status">Allow camera access to begin.</p>`;
@@ -36,14 +37,14 @@ export const lobbyScene = {
     root.querySelectorAll('[data-ref]').forEach(el => { $[el.dataset.ref] = el; });
 
     const finish = s => { state.session = s; go('booth'); };
-    const lock = () => { $.create.disabled = true; $.join.disabled = true; };
+    const lock = () => { $.create.disabled = true; $.join.disabled = true; $.solo.disabled = true; };
 
     function doJoin() {
       if (!$.code.value.trim()) return;
       lock(); $.status.textContent = 'Joining…';
       joinRoom($.code.value, state.localStream, {
         onReady: finish,
-        onError: e => { $.status.textContent = explain(e); $.create.disabled = false; $.join.disabled = false; },
+        onError: e => { $.status.textContent = explain(e); $.create.disabled = false; $.join.disabled = false; $.solo.disabled = false; },
       });
     }
 
@@ -65,6 +66,7 @@ export const lobbyScene = {
       catch (e) { $.link.select(); }
     });
     $.join.addEventListener('click', doJoin);
+    $.solo.addEventListener('click', () => { lock(); state.session = soloSession(); go('booth'); });
 
     try {
       state.localStream = await startCamera($.cam);
@@ -74,7 +76,7 @@ export const lobbyScene = {
         : 'Camera blocked. Allow camera access in your browser settings, then reload.';
       return;
     }
-    $.create.disabled = false; $.join.disabled = false;
+    $.create.disabled = false; $.join.disabled = false; $.solo.disabled = false;
     $.status.textContent = 'Camera ready. Create a room, or enter a code to join.';
     const room = new URLSearchParams(location.search).get('room');
     if (room) { $.code.value = room; doJoin(); }
