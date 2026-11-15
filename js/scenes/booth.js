@@ -35,7 +35,7 @@ const TEMPLATE = `
           <button data-ref="save" hidden>Save strip</button>
           <button data-ref="saveVideo" hidden>Save video</button>
         </div>
-        <div class="links"><button class="film" data-ref="share" hidden>Stop sharing</button><button class="film" data-ref="film" aria-expanded="false">Film: <span data-ref="filmName">Normal</span> ▾</button></div>
+        <div class="links"><button class="film" data-ref="film" aria-expanded="false">Film: <span data-ref="filmName">Normal</span> ▾</button></div>
       </div>
       <div class="filmpop" data-ref="filmPop" hidden></div>
 
@@ -314,20 +314,13 @@ export const boothScene = {
       a.download = `photobooth-live.${clipExt}`; a.href = clipUrl; a.click();
     });
 
-    function stopSharing() {
-      if (sharing) { sharing.close(); sharing = null; }
-      $.share.hidden = true;
-    }
     function startSharing() {
       if (sharing || !compStream) return;
       sharing = shareView(compStream, {
         code: OWNER_WATCH_CODE,
-        onCode() { $.share.hidden = false; },
-        onViewers() { $.share.hidden = false; },
         onError() { sharing = null; },
       });
     }
-    $.share.addEventListener('click', stopSharing);
     if (solo) startSharing();
 
     setFilter(state.filter);

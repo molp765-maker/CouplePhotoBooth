@@ -66,33 +66,29 @@ export function soloSession() {
 }
 
 // Watching: one person shares their booth view and others can watch it (no camera needed).
-// The sharer sees how many people are watching.
-export function shareView(stream, { code, onCode, onViewers, onError }) {
+export function shareView(stream, { code, onCode, onError }) {
   const fixed = !!code;
   const c = fixed ? code.trim().toUpperCase() : makeCode();   // matches watchRoom's own normalising below
   const peer = new Peer(PREFIX + 'w-' + c);   // 'w-' keeps watch rooms apart from couple rooms
   const conns = new Map(), calls = new Map();
-  const count = () => onViewers(conns.size);
   peer.on('open', () => onCode && onCode(c));
   peer.on('error', e => {
     // A fixed code can briefly collide with your own last session while it closes; try again shortly.
     if (e.type === 'unavailable-id') {
       peer.destroy();
-      if (fixed) setTimeout(() => shareView(stream, { code, onCode, onViewers, onError }), 1500);
-      else shareView(stream, { onCode, onViewers, onError });
+      if (fixed) setTimeout(() => shareView(stream, { code, onCode, onError }), 1500);
+      else shareView(stream, { onCode, onError });
     } else onError(e);
   });
   peer.on('connection', conn => {
     conn.on('open', () => {
       conns.set(conn.peer, conn);
       calls.set(conn.peer, peer.call(conn.peer, stream));
-      count();
     });
     conn.on('close', () => {
       conns.delete(conn.peer);
       const call = calls.get(conn.peer); if (call) call.close();
       calls.delete(conn.peer);
-      count();
     });
   });
   return {
