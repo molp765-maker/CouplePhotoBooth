@@ -6,6 +6,8 @@ import { createStrip, SHOTS, FW, FH } from '../booth/strip.js';
 import { HalfRenderer, createSegmenter } from '../booth/cutout.js';
 import { PRESETS, makeBackground, fileToBackground, backgroundFromDataURL } from '../booth/scenery.js';
 
+const OWNER_WATCH_CODE = 'Me';
+
 const HW = FW / 2;   // each person fills half of every photo; the host is always on the left
 
 const TEMPLATE = `
