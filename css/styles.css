@@ -187,3 +187,7 @@ button.fthumb canvas { border-radius: 10px; }
 .clipwrap figcaption { padding-top: 8px; font: 500 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--brown); text-align: right; }
 .stage video.live { transform: none; }
 .strip-img { width: 100%; height: auto; display: block; transform: rotate(1.8deg); box-shadow: 0 1px 0 rgba(25,25,25,.25), 0 24px 34px -16px rgba(25,25,25,.55); }
+
+/* photos appearing one by one on the watch page */
+.shots { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.shots .shot { width: calc(50% - 4px); aspect-ratio: 4 / 3; object-fit: cover; box-shadow: 0 1px 0 rgba(25,25,25,.25); }

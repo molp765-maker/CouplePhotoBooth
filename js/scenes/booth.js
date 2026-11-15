@@ -6,8 +6,6 @@ import { createStrip, SHOTS, FW, FH } from '../booth/strip.js';
 import { HalfRenderer, createSegmenter } from '../booth/cutout.js';
 import { PRESETS, makeBackground, fileToBackground, backgroundFromDataURL } from '../booth/scenery.js';
 
-const OWNER_WATCH_CODE = 'Me';
-
 const HW = FW / 2;   // each person fills half of every photo; the host is always on the left
 
 const TEMPLATE = `
@@ -37,7 +35,7 @@ const TEMPLATE = `
           <button data-ref="save" hidden>Save strip</button>
           <button data-ref="saveVideo" hidden>Save video</button>
         </div>
-        <div class="links"><button class="film" data-ref="share" hidden>Stop sharing</button><button class="film" data-ref="film" aria-expanded="false">Film: <span data-ref="filmName">Normal</span> ▾</button></div>
+        <div class="links"><button class="film" data-ref="film" aria-expanded="false">Film: <span data-ref="filmName">Normal</span> ▾</button></div>
       </div>
       <div class="filmpop" data-ref="filmPop" hidden></div>
 
@@ -185,7 +183,7 @@ export const boothScene = {
       if (now - last >= 50) {
         last = now;
         try { hostR.render(bgCanvas, now); if (guestR) guestR.render(bgCanvas, now);
-        if (compStream && (recording || sharing)) drawComp(now); }
+        if (compStream && (sharing || clipRec)) drawComp(now); }
         catch (e) { bgCanvas = null; bgId = 'original'; markChips(); $.status.textContent = 'The background effect stopped, so the original is on.'; }
       }
       if (!$.filmPop.hidden && now - lastThumb >= 250) {
@@ -263,6 +261,7 @@ export const boothScene = {
         mine.getContext('2d').drawImage(localCanvas, 0, 0, mine.width, FH);
         if (solo) {
           state.shots.push(mine);
+          if (sharing) sharing.send({ type: 'photo', i, total: SHOTS, data: mine.toDataURL('image/jpeg', 0.85) });
         } else {
           session.send({ type: 'frame', i, data: mine.toDataURL('image/jpeg', 0.9) });
           const theirs = await Promise.race([slot(i).promise, wait(8000).then(() => null)]);

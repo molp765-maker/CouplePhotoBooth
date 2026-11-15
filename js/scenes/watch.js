@@ -9,6 +9,7 @@ const TEMPLATE = `
       <p id="status" data-ref="status">Connecting...</p>
     </section>
     <aside class="strip-wrap">
+      <div class="shots" data-ref="shots"></div>
       <img class="strip-img" data-ref="strip" alt="The finished strip" hidden>
       <p class="strip-cap" data-ref="cap" hidden>Finished strip</p>
     </aside>
@@ -21,14 +22,25 @@ export const watchScene = {
     root.innerHTML = TEMPLATE;
     const $ = {};
     root.querySelectorAll('[data-ref]').forEach(el => { $[el.dataset.ref] = el; });
+    const slots = [];
+
     handle = watchRoom(params.code || '', {
       onStream(stream) {
         $.v.srcObject = stream; $.v.play().catch(() => {});
         $.live.textContent = 'Live'; $.status.textContent = 'Watching.';
       },
       onMessage(m) {
-        if (m && m.type === 'status') $.status.textContent = m.text;
-        if (m && m.type === 'strip') { $.strip.src = m.data; $.strip.hidden = false; $.cap.hidden = false; }
+        if (!m) return;
+        if (m.type === 'status') $.status.textContent = m.text;
+        if (m.type === 'photo') {
+          // A fresh row for each take: earlier photos stay, in case she retakes.
+          if (m.i === 0) { $.shots.innerHTML = ''; slots.length = 0; $.strip.hidden = true; $.cap.hidden = true; }
+          let img = slots[m.i];
+          if (!img) { img = new Image(); img.className = 'shot'; slots[m.i] = img; $.shots.appendChild(img); }
+          img.src = m.data;
+          $.status.textContent = `Photo ${m.i + 1} of ${m.total}.`;
+        }
+        if (m.type === 'strip') { $.strip.src = m.data; $.strip.hidden = false; $.cap.hidden = false; }
       },
       onClosed() { $.live.textContent = 'Ended'; $.status.textContent = 'The session has ended.'; },
       onError(e) {
