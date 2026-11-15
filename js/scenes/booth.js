@@ -1,5 +1,7 @@
 import { stopCamera } from '../booth/camera.js';
 import { FILTERS, getFilter, stampText } from '../booth/filters.js';
+import { clipSupported, createClipRecorder } from '../booth/clip.js';
+import { shareView } from '../net/session.js';
 import { createStrip, SHOTS, FW, FH } from '../booth/strip.js';
 import { HalfRenderer, createSegmenter } from '../booth/cutout.js';
 import { PRESETS, makeBackground, fileToBackground, backgroundFromDataURL } from '../booth/scenery.js';
@@ -19,6 +21,7 @@ const TEMPLATE = `
         <div class="lamp" data-ref="lamp"></div>
         <div class="count" data-ref="count" aria-live="assertive"></div>
         <div class="flash" data-ref="flash"></div>
+        <div class="watching" data-ref="watching" hidden></div>
       </div>
       <div class="tools">
         <div class="bgs" role="group" aria-label="Background" data-ref="bgs"></div>
@@ -30,15 +33,21 @@ const TEMPLATE = `
           <button class="primary" data-ref="start">Start</button>
           <button data-ref="retake" hidden>Retake</button>
           <button data-ref="save" hidden>Save strip</button>
+          <button data-ref="saveVideo" hidden>Save video</button>
         </div>
-        <button class="film" data-ref="film" aria-expanded="false">Film: <span data-ref="filmName">Normal</span> ▾</button>
+        <div class="links"><button class="film" data-ref="share" hidden>Stop sharing</button><button class="film" data-ref="film" aria-expanded="false">Film: <span data-ref="filmName">Normal</span> ▾</button></div>
       </div>
       <div class="filmpop" data-ref="filmPop" hidden></div>
+
       <p id="status" data-ref="status">You are both in. Either of you can press Start.</p>
     </section>
     <aside class="strip-wrap">
       <canvas id="strip" data-ref="strip" aria-label="Your photo strip"></canvas>
       <p class="strip-cap">Strip no. 01</p>
+      <figure class="clipwrap" data-ref="clipWrap" hidden>
+        <video data-ref="clip" muted loop playsinline autoplay></video>
+        <figcaption>Live clip</figcaption>
+      </figure>
     </aside>
   </div>`;
 
@@ -70,6 +79,52 @@ export const boothScene = {
     }
     const localCanvas = isHost ? $.cHost : $.cGuest;
     let busy = false, remote = [];
+
+    // ---- live clip and sharing: both use one combined picture of the booth view ----
+    const compW = solo ? 576 : 864, compH = solo ? 432 : 648;
+    const comp = document.createElement('canvas');
+    comp.width = compW; comp.height = compH;
+    const compStream = typeof comp.captureStream === 'function' ? comp.captureStream(20) : null;
+    const overlay = { count: '', flashAt: 0 };
+    let recording = false, sharing = null, clipRec = null, clipUrl = '', clipExt = 'webm';
+
+    function drawComp(now) {
+      const g = comp.getContext('2d'), f = getFilter(state.filter);
+      g.save();
+      if ('filter' in g) g.filter = f.css;
+      if (solo) g.drawImage($.cHost, 0, 0, compW, compH);
+      else { g.drawImage($.cHost, 0, 0, compW / 2, compH); g.drawImage($.cGuest, compW / 2, 0, compW / 2, compH); }
+      g.restore();
+      if (f.vig) {
+        const v = g.createRadialGradient(compW / 2, compH / 2, compH * 0.35, compW / 2, compH / 2, compW * 0.62);
+        v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, `rgba(0,0,0,${f.vig})`);
+        g.fillStyle = v; g.fillRect(0, 0, compW, compH);
+      }
+      if (f.p && f.p.stamp) {
+        g.save(); g.font = '500 16px "DM Mono", monospace'; g.textAlign = 'right'; g.fillStyle = '#ffb347';
+        g.fillText(stampText(), compW - 14, compH - 12); g.restore();
+      }
+      if (overlay.count) {
+        g.save(); g.fillStyle = '#F4EFE6'; g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.font = `500 ${Math.round(compH * 0.42)}px "Fraunces", Georgia, serif`;
+        g.shadowColor = 'rgba(0,0,0,.55)'; g.shadowBlur = 30;
+        g.fillText(String(overlay.count), compW / 2, compH / 2); g.restore();
+      }
+      const a = 1 - (now - overlay.flashAt) / 350;
+      if (a > 0 && a <= 1) { g.fillStyle = `rgba(255,255,255,${a})`; g.fillRect(0, 0, compW, compH); }
+    }
+
+    const say = text => { $.status.textContent = text; if (sharing) sharing.send({ type: 'status', text }); };
+    function clearClip() {
+      if (clipUrl) URL.revokeObjectURL(clipUrl);
+      clipUrl = ''; $.clipWrap.hidden = true; $.clip.removeAttribute('src');
+    }
+    function showClip(result) {
+      if (!result.blob.size) return;
+      clipUrl = URL.createObjectURL(result.blob); clipExt = result.ext;
+      $.clip.src = clipUrl; $.clipWrap.hidden = false; $.clip.play().catch(() => {});
+      $.saveVideo.hidden = false; $.saveVideo.disabled = false;
+    }
     let bgId = 'original', bgCanvas = null, segReady = false;
 
     // ---- background setting (shared with the other person) ----
@@ -127,7 +182,8 @@ export const boothScene = {
     function loop(now) {
       if (now - last >= 50) {
         last = now;
-        try { hostR.render(bgCanvas, now); if (guestR) guestR.render(bgCanvas, now); }
+        try { hostR.render(bgCanvas, now); if (guestR) guestR.render(bgCanvas, now);
+        if (compStream && (recording || sharing)) drawComp(now); }
         catch (e) { bgCanvas = null; bgId = 'original'; markChips(); $.status.textContent = 'The background effect stopped, so the original is on.'; }
       }
       if (!$.filmPop.hidden && now - lastThumb >= 250) {
@@ -181,19 +237,25 @@ export const boothScene = {
     }
 
     async function countdown(n) {
-      for (let i = n; i > 0; i--) { $.count.textContent = i; await wait(1000); }
-      $.count.textContent = '';
+      for (let i = n; i > 0; i--) {
+        $.count.textContent = i; overlay.count = i;
+        if (i === 1 && clipRec) clipRec.resume();   // the clip keeps only the last second before each photo
+        await wait(1000);
+      }
+      $.count.textContent = ''; overlay.count = '';
     }
 
     async function run() {
       if (busy) return;
       busy = true; remote = []; state.shots = []; redraw();
-      $.start.hidden = true; $.retake.hidden = true; $.save.hidden = true;
+      clearClip(); recording = true;
+      clipRec = compStream && clipSupported() ? createClipRecorder(compStream) : null;
+      $.start.hidden = true; $.retake.hidden = true; $.save.hidden = true; $.saveVideo.hidden = true;
       $.lamp.classList.add('on');
       for (let i = 0; i < SHOTS; i++) {
-        $.status.textContent = `Photo ${i + 1} of ${SHOTS}. Get ready.`;
+        say(`Photo ${i + 1} of ${SHOTS}. Get ready.`);
         await countdown(3);
-        $.flash.classList.remove('go'); void $.flash.offsetWidth; $.flash.classList.add('go');
+        $.flash.classList.remove('go'); void $.flash.offsetWidth; $.flash.classList.add('go'); overlay.flashAt = performance.now();
         const mine = document.createElement('canvas');   // your half, with the chosen background
         mine.width = solo ? FW : HW; mine.height = FH;
         mine.getContext('2d').drawImage(localCanvas, 0, 0, mine.width, FH);
@@ -206,9 +268,13 @@ export const boothScene = {
         }
         redraw();
         await wait(600);
+        if (clipRec) clipRec.pause();
       }
       $.lamp.classList.remove('on');
-      $.status.textContent = 'Done. Save your strip or retake.';
+      recording = false;
+      say('Done. Save your strip or retake.');
+      if (sharing) sharing.send({ type: 'strip', data: $.strip.toDataURL('image/jpeg', 0.8) });
+      if (clipRec) { try { showClip(await clipRec.stop()); } catch (e) {} clipRec = null; }
       $.retake.hidden = false; $.save.hidden = false; $.retake.disabled = false; $.save.disabled = false;
       busy = false;
     }
@@ -241,10 +307,35 @@ export const boothScene = {
       a.click();
     });
 
+    $.saveVideo.addEventListener('click', () => {
+      if (!clipUrl) return;
+      const a = document.createElement('a');
+      a.download = `photobooth-live.${clipExt}`; a.href = clipUrl; a.click();
+    });
+
+    // The one receiver watches automatically, through a fixed link only they have.
+    // The badge on screen always shows while it is on, and the button always lets her turn it off.
+    function stopSharing() {
+      if (sharing) { sharing.close(); sharing = null; }
+      $.watching.hidden = true; $.share.hidden = true;
+    }
+    function startSharing() {
+      if (sharing || !compStream) return;
+      sharing = shareView(compStream, {
+        code: OWNER_WATCH_CODE,
+        onViewers(n) { $.watching.textContent = n ? `${n} watching` : ''; $.watching.hidden = !n; $.share.hidden = false; },
+        onError() { sharing = null; },
+      });
+    }
+    $.share.addEventListener('click', stopSharing);
+    if (solo) startSharing();
+
     setFilter(state.filter);
 
     cleanup = () => {
       cancelAnimationFrame(raf);
+      if (sharing) sharing.close();
+      clearClip();
       hostR.close(); if (guestR) guestR.close();
       stopCamera(state.localStream);
       session.close();

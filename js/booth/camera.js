@@ -1,3 +1,5 @@
+// Grab a frame from the camera and return it as a canvas.
+// The canvas is mirrored like a real mirror.
 export async function startCamera(video) {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('unsupported');
   const stream = await navigator.mediaDevices.getUserMedia({

@@ -64,3 +64,46 @@ export function joinRoom(code, localStream, { onReady, onError }) {
 export function soloSession() {
   return { role: 'solo', remoteStream: null, connected: true, send() {}, on() {}, close() {} };
 }
+
+// Watching: one person shares their booth view and others can watch it (no camera needed).
+// The sharer sees how many people are watching.
+export function shareView(stream, { onCode, onViewers, onError }) {
+  const code = makeCode();
+  const peer = new Peer(PREFIX + 'w-' + code);   // 'w-' keeps watch rooms apart from couple rooms
+  const conns = new Map(), calls = new Map();
+  const count = () => onViewers(conns.size);
+  peer.on('open', () => onCode(code));
+  peer.on('error', e => {
+    if (e.type === 'unavailable-id') { peer.destroy(); shareView(stream, { onCode, onViewers, onError }); }
+    else onError(e);
+  });
+  peer.on('connection', conn => {
+    conn.on('open', () => {
+      conns.set(conn.peer, conn);
+      calls.set(conn.peer, peer.call(conn.peer, stream));
+      count();
+    });
+    conn.on('close', () => {
+      conns.delete(conn.peer);
+      const call = calls.get(conn.peer); if (call) call.close();
+      calls.delete(conn.peer);
+      count();
+    });
+  });
+  return {
+    send(msg) { conns.forEach(c => { if (c.open) c.send(msg); }); },
+    close() { peer.destroy(); },
+  };
+}
+
+export function watchRoom(code, { onStream, onMessage, onClosed, onError }) {
+  const peer = new Peer();
+  peer.on('error', onError);
+  peer.on('call', call => { call.answer(); call.on('stream', onStream); });
+  peer.on('open', () => {
+    const conn = peer.connect(PREFIX + 'w-' + code.trim().toUpperCase(), { reliable: true });
+    conn.on('data', onMessage);
+    conn.on('close', onClosed);
+  });
+  return { close() { peer.destroy(); } };
+}
