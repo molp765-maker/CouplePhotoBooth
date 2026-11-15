@@ -172,11 +172,6 @@ button.fthumb canvas { border-radius: 10px; }
 
 /* live clip, sharing and watching */
 .links { display: flex; gap: 22px; align-items: center; }
-.watching {
-  position: absolute; top: 14px; right: 14px; z-index: 2; display: flex; align-items: center; gap: 8px;
-  padding: 7px 12px; border-radius: 999px; background: rgba(25,25,25,.72); color: var(--cream); font: italic 500 13px/1 var(--soft);
-}
-.watching::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
 .sharepanel { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--ink); display: flex; flex-direction: column; gap: 10px; }
 .sharepanel label { display: flex; flex-direction: column; gap: 4px; font: 500 10px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
 .sharepanel input { font: 400 14px var(--mono); padding: 8px 0; border: 0; border-bottom: 1px solid var(--ink); background: transparent; color: var(--ink); width: 100%; border-radius: 0; }

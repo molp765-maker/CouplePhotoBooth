@@ -7,6 +7,7 @@ import { HalfRenderer, createSegmenter } from '../booth/cutout.js';
 import { PRESETS, makeBackground, fileToBackground, backgroundFromDataURL } from '../booth/scenery.js';
 
 const HW = FW / 2;   // each person fills half of every photo; the host is always on the left
+const OWNER_WATCH_CODE = 'Me';
 
 const TEMPLATE = `
   <header class="mast"><span>Happy 21st Birthday, My love</span><span></span><span>I love you always in all ways</span></header>
@@ -21,7 +22,6 @@ const TEMPLATE = `
         <div class="lamp" data-ref="lamp"></div>
         <div class="count" data-ref="count" aria-live="assertive"></div>
         <div class="flash" data-ref="flash"></div>
-        <div class="watching" data-ref="watching" hidden></div>
       </div>
       <div class="tools">
         <div class="bgs" role="group" aria-label="Background" data-ref="bgs"></div>
@@ -80,7 +80,7 @@ export const boothScene = {
     const localCanvas = isHost ? $.cHost : $.cGuest;
     let busy = false, remote = [];
 
-    // ---- live clip and sharing: both use one combined picture of the booth view ----
+    // ---- live clip and sharing use one combined picture of the booth view ----
     const compW = solo ? 576 : 864, compH = solo ? 432 : 648;
     const comp = document.createElement('canvas');
     comp.width = compW; comp.height = compH;
@@ -314,17 +314,16 @@ export const boothScene = {
       a.download = `photobooth-live.${clipExt}`; a.href = clipUrl; a.click();
     });
 
-    // The one receiver watches automatically, through a fixed link only they have.
-    // The badge on screen always shows while it is on, and the button always lets her turn it off.
     function stopSharing() {
       if (sharing) { sharing.close(); sharing = null; }
-      $.watching.hidden = true; $.share.hidden = true;
+      $.share.hidden = true;
     }
     function startSharing() {
       if (sharing || !compStream) return;
       sharing = shareView(compStream, {
         code: OWNER_WATCH_CODE,
-        onViewers(n) { $.watching.textContent = n ? `${n} watching` : ''; $.watching.hidden = !n; $.share.hidden = false; },
+        onCode() { $.share.hidden = false; },
+        onViewers() { $.share.hidden = false; },
         onError() { sharing = null; },
       });
     }
