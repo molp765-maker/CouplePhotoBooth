@@ -7,7 +7,7 @@ import { PRESETS, makeBackground, fileToBackground, backgroundFromDataURL } from
 const HW = FW / 2;   // each person fills half of every photo; the host is always on the left
 
 const TEMPLATE = `
-  <header class="mast"><span>Happy 21st Birthday, My love</span><span>Special gift, special memories, </span><span>special moments, special girl</span></header>
+  <header class="mast"><span>Happy 21st Birthday, My love</span><span></span><span>I love you always in all ways</span></header>
   <h1 class="booth-title">21 years, still as pretty as ever.</h1>
   <div class="layout">
     <section>
@@ -60,7 +60,7 @@ export const boothScene = {
     let hostR, guestR;
     if (solo) {
       $.stage.classList.remove('duo'); $.vGuest.remove(); $.cGuest.remove();
-      root.querySelector('.mast span:nth-child(2)').textContent = 'Special gift, special memories, ';
+      root.querySelector('.mast span:nth-child(2)').textContent = ' ';
       $.status.textContent = 'Press Start when you are ready.';
       hostR = new HalfRenderer($.vHost, $.cHost, 'full', 576, 432);
     } else {
