@@ -72,7 +72,7 @@ export function shareView(stream, { code, onCode, onViewers, onError }) {
   const c = fixed ? code.trim().toUpperCase() : makeCode();   // matches watchRoom's own normalising below
   const peer = new Peer(PREFIX + 'w-' + c);   // 'w-' keeps watch rooms apart from couple rooms
   const conns = new Map(), calls = new Map();
-  
+  const count = () => onViewers(conns.size);
   peer.on('open', () => onCode && onCode(c));
   peer.on('error', e => {
     // A fixed code can briefly collide with your own last session while it closes; try again shortly.

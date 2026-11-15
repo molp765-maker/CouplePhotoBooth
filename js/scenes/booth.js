@@ -35,7 +35,7 @@ const TEMPLATE = `
           <button data-ref="save" hidden>Save strip</button>
           <button data-ref="saveVideo" hidden>Save video</button>
         </div>
-        <div class="links"><button class="film" data-ref="film" aria-expanded="false">Film: <span data-ref="filmName">Normal</span> ▾</button></div>
+        <div class="links"><button class="film" data-ref="share" hidden>Stop sharing</button><button class="film" data-ref="film" aria-expanded="false">Film: <span data-ref="filmName">Normal</span> ▾</button></div>
       </div>
       <div class="filmpop" data-ref="filmPop" hidden></div>
 
