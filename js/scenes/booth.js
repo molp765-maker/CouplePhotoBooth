@@ -45,8 +45,8 @@ const TEMPLATE = `
     <aside class="strip-wrap">
       <div class="strip-frame">
         <canvas id="strip" data-ref="strip" aria-label="Photo strip. Click a photo to select it." role="group" tabindex="0"></canvas>
-        <button class="media-toggle" data-ref="mediaToggle" hidden>Video</button>
       </div>
+      <button class="media-toggle" data-ref="mediaToggle" hidden>Video</button>
       <p class="strip-cap">Strip no. 01</p>
     </aside>
   </div>`;
@@ -249,7 +249,6 @@ export const boothScene = {
       const shot = state.shots[index];
       $.mediaToggle.hidden = !allVideosReady();
       $.mediaToggle.textContent = 'Video';
-      $.mediaToggle.style.top = `${((strip.cellTop(index) + 8) / $.strip.height) * 100}%`;
       $.saveImage.disabled = !shot;
       $.saveVideo.disabled = !allVideosReady();
       redraw();

@@ -102,18 +102,17 @@ button[aria-pressed="true"] { background: var(--ink); color: var(--cream); }
 #status { margin: 22px 0 0; padding-top: 10px; border-top: 1px solid var(--ink); min-height: 2.2em; font: 400 12px/1.5 var(--mono); letter-spacing: .04em; }
 
 .strip-wrap { padding: 0; }
-.strip-frame { position: relative; transform: rotate(1.8deg); transition: transform .6s ease; }
+.strip-frame { transform: rotate(1.8deg); transition: transform .6s ease; }
 .strip-frame:hover { transform: rotate(0deg); }
 .media-toggle {
-  position: absolute; right: 12px; z-index: 2; padding: 8px 12px;
-  background: var(--cream); box-shadow: 0 1px 6px rgba(25,25,25,.3);
+  display: block; min-width: 112px; margin: 14px auto 0; padding: 10px 20px;
 }
 #strip {
   width: 100%; height: auto; display: block; cursor: pointer;
   box-shadow: 0 1px 0 rgba(25,25,25,.25), 0 24px 34px -16px rgba(25,25,25,.55);
 }
 #strip:focus-visible { outline: 2px solid var(--red); outline-offset: 4px; }
-.strip-cap { margin: 18px 0 0; font: 500 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; text-align: right; color: var(--brown); }
+.strip-cap { margin: 12px 0 0; font: 500 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; text-align: right; color: var(--brown); }
 
 @media (prefers-reduced-motion: reduce) {
   .cover-title span { animation: none; } #strip { transition: none; } .flash.go { animation-duration: .01s; }
