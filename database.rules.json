@@ -1,0 +1,44 @@
+{
+  "rules": {
+    "sessions": {
+      ".read": true,
+      ".indexOn": ["expiresAt"],
+      "$sessionId": {
+        ".write": "auth != null && ((!data.exists() && newData.child('ownerUid').val() === auth.uid) || data.child('ownerUid').val() === auth.uid)",
+        ".validate": "newData.hasChildren(['sessionId', 'peerCode', 'ownerUid', 'state', 'createdAt', 'lastSeenAt', 'expiresAt']) && newData.child('sessionId').val() === $sessionId && newData.child('peerCode').val().matches(/^[A-Fa-f0-9]{32}$/) && newData.child('ownerUid').val() === auth.uid && newData.child('state').val().matches(/^(entering|active|completed)$/) && newData.child('createdAt').isNumber() && newData.child('lastSeenAt').isNumber() && newData.child('expiresAt').isNumber() && (!newData.child('completedAt').exists() || newData.child('completedAt').isNumber()) && (!newData.child('stripPath').exists() || newData.child('stripPath').isString()) && (!newData.child('photos').exists() || newData.child('photos').numChildren() <= 4)",
+        "sessionId": {
+          ".validate": "newData.isString() && newData.val() === $sessionId"
+        },
+        "peerCode": {
+          ".validate": "newData.isString() && newData.val().matches(/^[A-Fa-f0-9]{32}$/)"
+        },
+        "ownerUid": {
+          ".validate": "newData.isString() && newData.val() === auth.uid"
+        },
+        "state": {
+          ".validate": "newData.isString() && newData.val().matches(/^(entering|active|completed)$/)"
+        },
+        "createdAt": {
+          ".validate": "newData.isNumber()"
+        },
+        "lastSeenAt": {
+          ".validate": "newData.isNumber()"
+        },
+        "expiresAt": {
+          ".validate": "newData.isNumber()"
+        },
+        "completedAt": {
+          ".validate": "newData.isNumber()"
+        },
+        "stripPath": {
+          ".validate": "newData.isString() && newData.val().matches(/^sessions\\/[A-Fa-f0-9]{32}\\/strip\\.png$/)"
+        },
+        "photos": {
+          "$index": {
+            ".validate": "$index.matches(/^[0-3]$/) && newData.isString() && newData.val().matches(/^sessions\\/[A-Fa-f0-9]{32}\\/photos\\/[0-3]\\.jpg$/)"
+          }
+        }
+      }
+    }
+  }
+}

@@ -2,12 +2,12 @@ import { stopCamera } from '../booth/camera.js';
 import { FILTERS, getFilter, stampText } from '../booth/filters.js';
 import { clipSupported, createClipRecorder } from '../booth/clip.js';
 import { shareView } from '../net/session.js';
+import { createSoloLiveSession } from '../net/liveRegistry.js';
 import { createStrip, SHOTS, FW, FH } from '../booth/strip.js';
 import { HalfRenderer, createSegmenter } from '../booth/cutout.js';
 import { PRESETS, makeBackground, fileToBackground, backgroundFromDataURL } from '../booth/scenery.js';
 
 const HW = FW / 2;   // each person fills half of every photo; the host is always on the left
-const OWNER_WATCH_CODE = 'Me';
 
 const TEMPLATE = `
   <header class="mast"><span>Happy 21st Birthday, My love</span><span></span><span>I love you always in all ways</span></header>
@@ -40,6 +40,7 @@ const TEMPLATE = `
       </div>
       <div class="filmpop" data-ref="filmPop" hidden></div>
 
+      <p class="monitor-notice" data-ref="monitorNotice" role="status" aria-live="polite" hidden></p>
       <p id="status" data-ref="status">You are both in. Either of you can press Start.</p>
     </section>
     <aside class="strip-wrap">
@@ -72,6 +73,10 @@ export const boothScene = {
     });
     const solo = session.role === 'solo';
     const isHost = session.role !== 'guest';
+    if (solo) {
+      $.monitorNotice.hidden = false;
+      $.monitorNotice.textContent = 'Starting live monitoring. This feed is visible on the public Watch Page.';
+    }
     $.vHost.srcObject = isHost ? state.localStream : session.remoteStream;
     let hostR, guestR;
     if (solo) {
@@ -94,6 +99,9 @@ export const boothScene = {
     const compStream = typeof comp.captureStream === 'function' ? comp.captureStream(20) : null;
     const overlay = { count: '', flashAt: 0 };
     let sharing = null, clipRec = null;
+    let disposed = false;
+    let liveArchiveError = false;
+    let liveHandlePromise = Promise.resolve(null);
 
     function drawComp(now) {
       const g = comp.getContext('2d'), f = getFilter(state.filter);
@@ -428,6 +436,17 @@ export const boothScene = {
     async function run() {
       if (busy || exportingVideo) return;
       busy = true; remote = []; stopPreview(); state.shots = []; selectedShot = -1; redraw();
+      liveArchiveError = false;
+      if (solo) {
+        const monitor = await liveHandlePromise;
+        if (monitor) {
+          try { await monitor.resetPhotos(); }
+          catch (error) {
+            liveArchiveError = true;
+            console.error('Could not reset the Solo session photo archive.', error);
+          }
+        }
+      }
       clipRec = null;
       $.mediaToggle.hidden = true; $.mediaToggle.textContent = 'Video';
       $.start.hidden = true; $.retake.hidden = true; $.saveImage.hidden = true; $.save.hidden = true; $.saveVideo.hidden = true;
@@ -470,7 +489,14 @@ export const boothScene = {
         }
         let photo = mine;
         if (solo) {
-          if (sharing) sharing.send({ type: 'photo', i, total: SHOTS, data: mine.toDataURL('image/jpeg', 0.85) });
+          const data = mine.toDataURL('image/jpeg', 0.85);
+          if (sharing) sharing.send({ type: 'photo', i, total: SHOTS, data });
+          liveHandlePromise.then(monitor => monitor && monitor.publishPhoto(i, data))
+            .catch(error => {
+              liveArchiveError = true;
+              console.error(`Could not archive Solo photo ${i + 1}.`, error);
+              if (!busy && !disposed) say('A photo was captured locally, but its Watch Page copy could not be saved.');
+            });
         } else {
           session.send({ type: 'frame', i, data: mine.toDataURL('image/jpeg', 0.9) });
           const theirs = await Promise.race([slot(i).promise, wait(8000).then(() => null)]);
@@ -492,7 +518,10 @@ export const boothScene = {
         await wait(600);
       }
       $.lamp.classList.remove('on');
-      say(videoError ? 'Done. Some videos could not be recorded.' : 'Done. Save your photos or retake.');
+      const completionMessages = [];
+      if (videoError) completionMessages.push('Some videos could not be recorded.');
+      if (liveArchiveError) completionMessages.push('Some photos could not be saved to the Watch Page.');
+      say(completionMessages.length ? `Done. ${completionMessages.join(' ')}` : 'Done. Save your photos or retake.');
       if (sharing) sharing.send({ type: 'strip', data: strip.toDataURL(state.shots, state.filter) });
       $.retake.hidden = false; $.saveImage.hidden = false; $.save.hidden = false; $.saveVideo.hidden = false;
       $.saveImage.disabled = selectedShot < 0;
@@ -594,20 +623,57 @@ export const boothScene = {
 
     $.saveVideo.addEventListener('click', saveStripVideo);
 
-    function startSharing() {
-      if (sharing || !compStream) return;
-      sharing = shareView(compStream, {
-        code: OWNER_WATCH_CODE,
-        onError() { sharing = null; },
+    function currentStripDataURL() {
+      return state.shots.length ? strip.toDataURL(state.shots, state.filter) : null;
+    }
+    async function startSharing() {
+      if (!compStream) throw new Error('This browser cannot share a live booth canvas.');
+      const monitor = await createSoloLiveSession();
+      if (disposed) {
+        await monitor.finish(currentStripDataURL());
+        return null;
+      }
+      try {
+        sharing = shareView(compStream, {
+          code: monitor.sessionId,
+          onCode() {
+            $.monitorNotice.textContent = 'Live monitoring is active. This feed is visible on the public Watch Page.';
+            monitor.activate().catch(error => {
+              $.monitorNotice.hidden = true;
+              console.error('Could not activate the Solo live session.', error);
+            });
+          },
+          onError(error) {
+            sharing = null;
+            $.monitorNotice.hidden = true;
+            console.error('The Solo live video connection failed.', error);
+            monitor.finish(currentStripDataURL())
+              .catch(finishError => console.error('Could not complete the failed Solo live session.', finishError));
+          },
+        });
+      } catch (error) {
+        await monitor.finish(currentStripDataURL());
+        throw error;
+      }
+      return monitor;
+    }
+    if (solo) {
+      liveHandlePromise = startSharing().catch(error => {
+        console.error('Could not start automatic Solo live monitoring.', error);
+        if (!disposed) $.monitorNotice.hidden = true;
+        return null;
       });
     }
-    if (solo) startSharing();
 
     setFilter(state.filter);
 
     cleanup = () => {
+      disposed = true;
       cancelAnimationFrame(raf);
       if (sharing) sharing.close();
+      const finalStrip = currentStripDataURL();
+      liveHandlePromise.then(monitor => monitor && monitor.finish(finalStrip))
+        .catch(error => console.error('Could not archive the completed Solo session.', error));
       stopPreview();
       if (exportRecorder) {
         exportRecorder.stop().catch(error => console.error('Could not stop the photo strip video export.', error));
