@@ -32,6 +32,7 @@ const TEMPLATE = `
         <div class="actions">
           <button class="primary" data-ref="start">Start</button>
           <button data-ref="retake" hidden>Retake</button>
+          <button data-ref="saveImage" hidden>Save image</button>
           <button data-ref="save" hidden>Save strip</button>
           <button data-ref="saveVideo" hidden>Save video</button>
         </div>
@@ -42,12 +43,11 @@ const TEMPLATE = `
       <p id="status" data-ref="status">You are both in. Either of you can press Start.</p>
     </section>
     <aside class="strip-wrap">
-      <canvas id="strip" data-ref="strip" aria-label="Your photo strip"></canvas>
+      <div class="strip-frame">
+        <canvas id="strip" data-ref="strip" aria-label="Photo strip. Click a photo to select it." role="group" tabindex="0"></canvas>
+        <button class="media-toggle" data-ref="mediaToggle" hidden>Video</button>
+      </div>
       <p class="strip-cap">Strip no. 01</p>
-      <figure class="clipwrap" data-ref="clipWrap" hidden>
-        <video data-ref="clip" muted loop playsinline autoplay></video>
-        <figcaption>Live clip</figcaption>
-      </figure>
     </aside>
   </div>`;
 
@@ -63,6 +63,13 @@ export const boothScene = {
     const $ = {};
     root.querySelectorAll('[data-ref]').forEach(el => { $[el.dataset.ref] = el; });
     const strip = createStrip($.strip);
+    const previewVideos = Array.from({ length: SHOTS }, () => {
+      const video = document.createElement('video');
+      video.muted = true; video.playsInline = true; video.preload = 'auto';
+      video.hidden = true; video.setAttribute('aria-hidden', 'true');
+      $.strip.parentElement.appendChild(video);
+      return video;
+    });
     const solo = session.role === 'solo';
     const isHost = session.role !== 'guest';
     $.vHost.srcObject = isHost ? state.localStream : session.remoteStream;
@@ -81,12 +88,12 @@ export const boothScene = {
     let busy = false, remote = [];
 
     // ---- live clip and sharing use one combined picture of the booth view ----
-    const compW = solo ? 576 : 864, compH = solo ? 432 : 648;
+    const compW = FW, compH = FH;
     const comp = document.createElement('canvas');
     comp.width = compW; comp.height = compH;
     const compStream = typeof comp.captureStream === 'function' ? comp.captureStream(20) : null;
     const overlay = { count: '', flashAt: 0 };
-    let recording = false, sharing = null, clipRec = null, clipUrl = '', clipExt = 'webm';
+    let sharing = null, clipRec = null;
 
     function drawComp(now) {
       const g = comp.getContext('2d'), f = getFilter(state.filter);
@@ -115,16 +122,6 @@ export const boothScene = {
     }
 
     const say = text => { $.status.textContent = text; if (sharing) sharing.send({ type: 'status', text }); };
-    function clearClip() {
-      if (clipUrl) URL.revokeObjectURL(clipUrl);
-      clipUrl = ''; $.clipWrap.hidden = true; $.clip.removeAttribute('src');
-    }
-    function showClip(result) {
-      if (!result.blob.size) return;
-      clipUrl = URL.createObjectURL(result.blob); clipExt = result.ext;
-      $.clip.src = clipUrl; $.clipWrap.hidden = false; $.clip.play().catch(() => {});
-      $.saveVideo.hidden = false; $.saveVideo.disabled = false;
-    }
     let bgId = 'original', bgCanvas = null, segReady = false;
 
     // ---- background setting (shared with the other person) ----
@@ -212,7 +209,184 @@ export const boothScene = {
     });
 
     // ---- photos ----
-    const redraw = () => strip.draw(state.shots, state.filter);
+    let selectedShot = -1, showingVideo = false, previewUrls = [], previewRaf = 0;
+    let playbackGeneration = 0, playbackSession = null, exportingVideo = false;
+    let exportRecorder = null, exportStream = null;
+    const allVideosReady = () => state.shots.length === SHOTS && state.shots.every(shot => shot.videoBlob);
+    const redraw = () => strip.draw(state.shots, state.filter, showingVideo ? { videos: previewVideos } : null);
+
+    function removePlaybackListeners(playback) {
+      previewVideos.forEach(video => {
+        video.removeEventListener('ended', playback.onEnded);
+        video.removeEventListener('error', playback.onError);
+      });
+    }
+
+    function stopPreview() {
+      showingVideo = false;
+      playbackGeneration++;
+      cancelAnimationFrame(previewRaf);
+      previewRaf = 0;
+      const playback = playbackSession;
+      playbackSession = null;
+      if (playback) {
+        removePlaybackListeners(playback);
+        playback.resolve(false);
+      }
+      previewVideos.forEach(video => {
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
+      });
+      previewUrls.forEach(url => URL.revokeObjectURL(url));
+      previewUrls = [];
+    }
+
+    function selectShot(index) {
+      if (exportingVideo) return;
+      if (showingVideo || previewUrls.length) stopPreview();
+      selectedShot = index;
+      const shot = state.shots[index];
+      $.mediaToggle.hidden = !allVideosReady();
+      $.mediaToggle.textContent = 'Video';
+      $.mediaToggle.style.top = `${((strip.cellTop(index) + 8) / $.strip.height) * 100}%`;
+      $.saveImage.disabled = !shot;
+      $.saveVideo.disabled = !allVideosReady();
+      redraw();
+    }
+
+    let lastPreviewDraw = 0;
+    function drawPlayback(now) {
+      if (!showingVideo) return;
+      if (now - lastPreviewDraw >= 33) {
+        const masterTime = previewVideos[0].currentTime;
+        previewVideos.slice(1).forEach(video => {
+          if (!video.ended && Math.abs(video.currentTime - masterTime) > 0.1) video.currentTime = masterTime;
+        });
+        redraw();
+        lastPreviewDraw = now;
+      }
+      previewRaf = requestAnimationFrame(drawPlayback);
+    }
+
+    function waitForVideo(video) {
+      if (video.readyState >= 2 && video.videoWidth) return Promise.resolve(true);
+      return new Promise((resolve, reject) => {
+        const source = video.getAttribute('src');
+        const cleanup = () => {
+          video.removeEventListener('loadeddata', onReady);
+          video.removeEventListener('canplay', onReady);
+          video.removeEventListener('error', onError);
+          video.removeEventListener('abort', onAbort);
+          video.removeEventListener('emptied', onEmptied);
+        };
+        const onReady = () => {
+          if (video.readyState >= 2 && video.videoWidth) { cleanup(); resolve(true); }
+        };
+        const onError = () => { cleanup(); reject(video.error || new Error('A photo video could not be loaded.')); };
+        const onAbort = () => {
+          if (video.getAttribute('src') !== source) { cleanup(); resolve(false); }
+        };
+        const onEmptied = () => {
+          if (video.getAttribute('src') !== source) { cleanup(); resolve(false); }
+        };
+        video.addEventListener('loadeddata', onReady);
+        video.addEventListener('canplay', onReady);
+        video.addEventListener('error', onError);
+        video.addEventListener('abort', onAbort);
+        video.addEventListener('emptied', onEmptied);
+        onReady();
+      });
+    }
+
+    async function preparePreview() {
+      stopPreview();
+      if (!allVideosReady()) throw new Error('All four photo videos are needed for strip playback.');
+      const generation = playbackGeneration;
+      previewVideos.forEach((video, index) => {
+        const url = URL.createObjectURL(state.shots[index].videoBlob);
+        previewUrls.push(url);
+        video.src = url;
+        video.load();
+      });
+      const ready = await Promise.all(previewVideos.map(waitForVideo));
+      if (generation !== playbackGeneration || ready.some(result => !result)) return false;
+      previewVideos.forEach(video => { video.currentTime = 0; });
+      showingVideo = true;
+      redraw();
+      return true;
+    }
+
+    function finishPreview(playback, error = null) {
+      if (playbackSession !== playback) return;
+      playbackSession = null;
+      removePlaybackListeners(playback);
+      stopPreview();
+      $.mediaToggle.textContent = 'Video';
+      redraw();
+      if (error) playback.reject(error);
+      else playback.resolve(true);
+    }
+
+    function playPreparedVideos() {
+      return new Promise((resolve, reject) => {
+        const playback = {
+          resolve,
+          reject,
+          onEnded: () => {
+            if (previewVideos.every(video => video.ended)) finishPreview(playback);
+          },
+          onError: () => finishPreview(playback, new Error('A photo video could not be played.')),
+        };
+        playbackSession = playback;
+        previewVideos.forEach(video => {
+          video.addEventListener('ended', playback.onEnded);
+          video.addEventListener('error', playback.onError);
+        });
+        Promise.all(previewVideos.map(video => video.play())).then(() => {
+          if (playbackSession !== playback) return;
+          $.mediaToggle.textContent = 'Photo';
+          lastPreviewDraw = 0;
+          drawPlayback();
+        }).catch(error => finishPreview(playback, error));
+      });
+    }
+
+    async function togglePreview() {
+      if (exportingVideo) return;
+      if (showingVideo) {
+        stopPreview();
+        $.mediaToggle.textContent = 'Video';
+        redraw();
+        return;
+      }
+      try {
+        if (await preparePreview()) await playPreparedVideos();
+      } catch (e) {
+        stopPreview();
+        $.mediaToggle.textContent = 'Video';
+        redraw();
+        say('Could not play the full photo strip video.');
+      }
+    }
+
+    $.strip.addEventListener('click', event => {
+      const rect = $.strip.getBoundingClientRect();
+      const angle = 1.8 * Math.PI / 180;
+      const dx = event.clientX - (rect.left + rect.width / 2);
+      const dy = event.clientY - (rect.top + rect.height / 2);
+      const localY = -dx * Math.sin(angle) + dy * Math.cos(angle) + $.strip.offsetHeight / 2;
+      const y = localY * ($.strip.height / $.strip.offsetHeight);
+      const index = strip.indexAt(y);
+      if (index >= 0 && state.shots[index]) selectShot(index);
+    });
+    $.strip.addEventListener('keydown', event => {
+      if (!state.shots.length || !['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft'].includes(event.key)) return;
+      event.preventDefault();
+      const direction = event.key === 'ArrowDown' || event.key === 'ArrowRight' ? 1 : -1;
+      selectShot((selectedShot + direction + state.shots.length) % state.shots.length);
+    });
+    $.mediaToggle.addEventListener('click', togglePreview);
 
     function compose(mine, theirs) {
       const c = document.createElement('canvas');
@@ -226,6 +400,7 @@ export const boothScene = {
     }
 
     function setFilter(id) {
+      if (exportingVideo) return;
       const f = getFilter(id);
       state.filter = f.id;
       $.stage.style.setProperty('--film', f.css);
@@ -236,51 +411,149 @@ export const boothScene = {
       redraw();
     }
 
-    async function countdown(n) {
+    async function countdown(n, onRecorderStart) {
       for (let i = n; i > 0; i--) {
         $.count.textContent = i; overlay.count = i;
-        if (i === 1 && clipRec) clipRec.resume();   // the clip keeps only the last second before each photo
-        await wait(1000);
+        if (i === n) {
+          await wait(500);
+          onRecorderStart();
+          await wait(500);
+        } else {
+          await wait(1000);
+        }
       }
       $.count.textContent = ''; overlay.count = '';
     }
 
     async function run() {
-      if (busy) return;
-      busy = true; remote = []; state.shots = []; redraw();
-      clearClip(); recording = true;
-      clipRec = compStream && clipSupported() ? createClipRecorder(compStream) : null;
-      $.start.hidden = true; $.retake.hidden = true; $.save.hidden = true; $.saveVideo.hidden = true;
+      if (busy || exportingVideo) return;
+      busy = true; remote = []; stopPreview(); state.shots = []; selectedShot = -1; redraw();
+      clipRec = null;
+      $.mediaToggle.hidden = true; $.mediaToggle.textContent = 'Video';
+      $.start.hidden = true; $.retake.hidden = true; $.saveImage.hidden = true; $.save.hidden = true; $.saveVideo.hidden = true;
+      $.saveImage.disabled = true; $.saveVideo.disabled = true;
       $.lamp.classList.add('on');
+      let videoError = false;
       for (let i = 0; i < SHOTS; i++) {
         say(`Photo ${i + 1} of ${SHOTS}. Get ready.`);
-        await countdown(3);
+        let shotRecorder = null;
+        await countdown(3, () => {
+          if (compStream && clipSupported()) {
+            try {
+              shotRecorder = createClipRecorder(compStream);
+              clipRec = shotRecorder;
+            } catch (e) {
+              videoError = true;
+              console.error(`Could not start recording photo ${i + 1}.`, e);
+            }
+          } else {
+            videoError = true;
+          }
+        });
         $.flash.classList.remove('go'); void $.flash.offsetWidth; $.flash.classList.add('go'); overlay.flashAt = performance.now();
         const mine = document.createElement('canvas');   // your half, with the chosen background
         mine.width = solo ? FW : HW; mine.height = FH;
         mine.getContext('2d').drawImage(localCanvas, 0, 0, mine.width, FH);
+        let videoPromise = null;
+        if (shotRecorder) {
+          videoPromise = (async () => {
+            await wait(2500);
+            if (clipRec === shotRecorder) clipRec = null;
+            try {
+              return await shotRecorder.stop();
+            } catch (e) {
+              videoError = true;
+              console.error(`Could not finish recording photo ${i + 1}.`, e);
+              return null;
+            }
+          })();
+        }
+        let photo = mine;
         if (solo) {
-          state.shots.push(mine);
           if (sharing) sharing.send({ type: 'photo', i, total: SHOTS, data: mine.toDataURL('image/jpeg', 0.85) });
         } else {
           session.send({ type: 'frame', i, data: mine.toDataURL('image/jpeg', 0.9) });
           const theirs = await Promise.race([slot(i).promise, wait(8000).then(() => null)]);
-          state.shots.push(compose(mine, theirs));
+          photo = compose(mine, theirs);
         }
+
+        let video = null;
+        if (videoPromise) {
+          video = await videoPromise;
+        }
+        const videoBlob = video && video.blob.size ? video.blob : null;
+        if (video && !videoBlob) {
+          videoError = true;
+          console.error(`Recording photo ${i + 1} produced an empty video.`);
+        }
+        state.shots.push({ photo, videoBlob, videoExt: videoBlob && video.ext });
+        selectShot(state.shots.length - 1);
         redraw();
         await wait(600);
-        if (clipRec) clipRec.pause();
       }
       $.lamp.classList.remove('on');
-      recording = false;
-      say('Done. Save your strip or retake.');
-      if (sharing) sharing.send({ type: 'strip', data: $.strip.toDataURL('image/jpeg', 0.8) });
-      if (clipRec) { try { showClip(await clipRec.stop()); } catch (e) {} clipRec = null; }
-      $.retake.hidden = false; $.save.hidden = false; $.retake.disabled = false; $.save.disabled = false;
+      say(videoError ? 'Done. Some videos could not be recorded.' : 'Done. Save your photos or retake.');
+      if (sharing) sharing.send({ type: 'strip', data: strip.toDataURL(state.shots, state.filter) });
+      $.retake.hidden = false; $.saveImage.hidden = false; $.save.hidden = false; $.saveVideo.hidden = false;
+      $.saveImage.disabled = selectedShot < 0;
+      $.saveVideo.disabled = !allVideosReady();
+      $.retake.disabled = false; $.save.disabled = false;
       busy = false;
     }
 
-    const begin = () => { if (!busy) { session.send({ type: 'start' }); run(); } };
+    const begin = () => { if (!busy && !exportingVideo) { session.send({ type: 'start' }); run(); } };
+
+    async function saveStripVideo() {
+      if (exportingVideo || !allVideosReady()) return;
+      if (typeof $.strip.captureStream !== 'function' || !clipSupported()) {
+        say('Video export is not supported in this browser.');
+        return;
+      }
+
+      exportingVideo = true;
+      [$.mediaToggle, $.saveImage, $.save, $.saveVideo, $.retake].forEach(button => { button.disabled = true; });
+      say('Preparing the four-frame video strip...');
+      try {
+        if (!await preparePreview()) throw new Error('The photo videos were interrupted before export.');
+        redraw();
+        exportStream = $.strip.captureStream(20);
+        exportRecorder = createClipRecorder(exportStream);
+        const completed = await playPreparedVideos();
+        if (!completed) throw new Error('The full-strip video export was interrupted.');
+        const result = await exportRecorder.stop();
+        exportRecorder = null;
+        if (!result.blob.size) throw new Error('The exported photo strip video is empty.');
+        const url = URL.createObjectURL(result.blob);
+        const a = document.createElement('a');
+        a.download = `photobooth-strip-${state.filter}.${result.ext}`;
+        a.href = url; a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        say('The full photo strip video was saved.');
+      } catch (e) {
+        stopPreview();
+        $.mediaToggle.textContent = 'Video';
+        redraw();
+        say('Could not save the full photo strip video.');
+        console.error('Could not export the full photo strip video.', e);
+      } finally {
+        if (exportRecorder) {
+          try { await exportRecorder.stop(); }
+          catch (e) { console.error('Could not stop the photo strip video export.', e); }
+          exportRecorder = null;
+        }
+        if (exportStream) {
+          exportStream.getTracks().forEach(track => track.stop());
+          exportStream = null;
+        }
+        exportingVideo = false;
+        $.mediaToggle.disabled = false;
+        $.saveImage.disabled = selectedShot < 0;
+        $.save.disabled = false;
+        $.saveVideo.disabled = !allVideosReady();
+        $.retake.disabled = false;
+        redraw();
+      }
+    }
 
     // film picker: one link that opens a row of live thumbnails
     const thumbs = [];
@@ -302,17 +575,24 @@ export const boothScene = {
     $.start.addEventListener('click', begin);
     $.retake.addEventListener('click', begin);
     $.save.addEventListener('click', () => {
+      if (exportingVideo) return;
       const a = document.createElement('a');
       a.download = `photobooth-strip-${state.filter}.png`;
-      a.href = strip.toDataURL();
+      a.href = strip.toDataURL(state.shots, state.filter);
       a.click();
     });
 
-    $.saveVideo.addEventListener('click', () => {
-      if (!clipUrl) return;
+    $.saveImage.addEventListener('click', () => {
+      if (exportingVideo) return;
+      const shot = state.shots[selectedShot];
+      if (!shot) return;
       const a = document.createElement('a');
-      a.download = `photobooth-live.${clipExt}`; a.href = clipUrl; a.click();
+      a.download = `photobooth-photo-${selectedShot + 1}-${state.filter}.png`;
+      a.href = strip.photoDataURL(shot, state.filter);
+      a.click();
     });
+
+    $.saveVideo.addEventListener('click', saveStripVideo);
 
     function startSharing() {
       if (sharing || !compStream) return;
@@ -328,7 +608,20 @@ export const boothScene = {
     cleanup = () => {
       cancelAnimationFrame(raf);
       if (sharing) sharing.close();
-      clearClip();
+      stopPreview();
+      if (exportRecorder) {
+        exportRecorder.stop().catch(error => console.error('Could not stop the photo strip video export.', error));
+        exportRecorder = null;
+      }
+      if (exportStream) {
+        exportStream.getTracks().forEach(track => track.stop());
+        exportStream = null;
+      }
+      if (clipRec) {
+        clipRec.stop().catch(error => console.error('Could not finish the photo video while leaving the booth.', error));
+        clipRec = null;
+      }
+      previewVideos.forEach(video => video.remove());
       hostR.close(); if (guestR) guestR.close();
       stopCamera(state.localStream);
       session.close();

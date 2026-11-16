@@ -14,15 +14,18 @@ export function createStrip(canvas) {
   const ctx = canvas.getContext('2d');
   canvas.width = W; canvas.height = H;
 
-  function draw(shots, filterId) {
+  function draw(shots, filterId, preview = null) {
     const f = getFilter(filterId);
     ctx.fillStyle = f.paper;
     ctx.fillRect(0, 0, W, H);
     for (let i = 0; i < SHOTS; i++) {
-      const y = PAD + i * (FH + PAD);
+      const y = cellTop(i);
       const shot = shots[i];
       if (shot) {
-        ctx.drawImage(graded(shot, f), PAD, y);
+        const photo = shot.photo || shot;
+        const video = preview && preview.videos[i] && preview.videos[i].readyState >= 2 && preview.videos[i].videoWidth
+          ? preview.videos[i] : null;
+        ctx.drawImage(video || graded(photo, f), PAD, y, FW, FH);
       } else {
         ctx.fillStyle = '#d9d2cc';
         ctx.fillRect(PAD, y, FW, FH);
@@ -36,5 +39,27 @@ export function createStrip(canvas) {
     ctx.fillText(new Date().toLocaleDateString('en-NZ', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.'), W / 2, H - 20);
   }
 
-  return { draw, toDataURL: () => canvas.toDataURL('image/png') };
+  function cellTop(index) {
+    return PAD + index * (FH + PAD);
+  }
+
+  function indexAt(y) {
+    for (let i = 0; i < SHOTS; i++) {
+      const top = cellTop(i);
+      if (y >= top && y < top + FH) return i;
+    }
+    return -1;
+  }
+
+  function photoDataURL(shot, filterId) {
+    const f = getFilter(filterId);
+    return graded(shot.photo || shot, f).toDataURL('image/png');
+  }
+
+  function toDataURL(shots, filterId) {
+    draw(shots, filterId);
+    return canvas.toDataURL('image/png');
+  }
+
+  return { draw, toDataURL, photoDataURL, cellTop, indexAt };
 }
