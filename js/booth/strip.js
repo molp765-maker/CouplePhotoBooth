@@ -36,7 +36,7 @@ export function createStrip(canvas) {
     ctx.font = '500 28px "Bodoni Moda", Didot, Georgia, serif';
     ctx.fillText("Lorin's 21st Birthday", W / 2, H - 46);
     ctx.font = '400 14px "DM Mono", Consolas, monospace';
-    ctx.fillText(new Date().toLocaleDateString('en-NZ', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.'), W / 2, H - 20);
+    ctx.fillText('15/11/2026', W / 2, H - 20);
   }
 
   function cellTop(index) {
